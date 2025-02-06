@@ -14,6 +14,10 @@ mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
 
+# Colors (BRG Format)
+COLOR_BACKGROUND = (20, 20, 40)  # Dark blue
+COLOR_WHITE = (255, 255, 255)  # White
+
 prev_time = 0
 
 # Open a video file or capture from webcam
@@ -21,6 +25,28 @@ video_path = 0  # Replace with your video path or use 0 for webcam
 cap = cv2.VideoCapture(video_path)
 
 cap.set(cv2.CAP_PROP_FPS, 30)
+
+def draw_debug_panel(frame, hand_landmarks):
+    """
+    Draws a debug panel with landmark coordinates.
+    """
+    h, w, _ = frame.shape
+    panel_width = 300
+    cv2.rectangle(frame, (w - panel_width, 0), (w, h), COLOR_BACKGROUND, -1)
+
+    # Header.
+    cv2.putText(frame, "DEBUG PANEL", (w - panel_width + 10, 30),
+                cv2.FONT_HERSHEY_DUPLEX, 0.8, COLOR_WHITE, 1, cv2.LINE_AA)
+
+    # Landmark coordinates.
+    y_offset = 70
+    for idx, lm in enumerate(hand_landmarks.landmark):
+        cx, cy = int(lm.x * w), int(lm.y * h)
+        cv2.putText(frame, f"Landmark {idx}: ({cx}, {cy})",
+                    (w - panel_width + 10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_WHITE, 1, cv2.LINE_AA)
+        y_offset += 20
+
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -47,6 +73,7 @@ while cap.isOpened():
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
             mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            draw_debug_panel(frame, hand_landmarks)
 
             # Detect gestures
             if gt.is_fist(hand_landmarks):
