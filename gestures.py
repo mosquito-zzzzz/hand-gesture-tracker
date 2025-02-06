@@ -1,4 +1,3 @@
-import cv2
 import mediapipe as mp
 import math
 
@@ -7,8 +6,19 @@ mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
 
+# Pinch thresholds
+pinch_threshold = 0.05
+
 def calculate_distance(landmark1, landmark2):
     return math.sqrt((landmark1.x - landmark2.x)**2 + (landmark1.y - landmark2.y)**2)
+
+def is_pinch(lm1, lm2, landmarks):
+    # Calculate distance between two landmarks
+    distance = math.hypot(
+        landmarks[lm1].x - landmarks[lm2].x,
+        landmarks[lm1].y - landmarks[lm2].y
+    )
+    return distance < pinch_threshold
 
 def is_fist(hand_landmarks):
     thumb_tip = hand_landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]

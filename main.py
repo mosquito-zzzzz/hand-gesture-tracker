@@ -1,6 +1,8 @@
 import cv2
 import mediapipe as mp
 import time
+import numpy as np
+import pyautogui
 import gestures as gt
 import warnings
 warnings.filterwarnings("ignore", message=".NORM_RECT without IMAGE_DIMENSIONS.")
@@ -47,6 +49,13 @@ def draw_debug_panel(frame, hand_landmarks):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_WHITE, 1, cv2.LINE_AA)
         y_offset += 20
 
+# Screen dimensions
+screen_w, screen_h = pyautogui.size()
+
+# Smoothing parameters (to reduce mouse jitter)
+smoothing_factor = 2
+prev_x, prev_y = 0, 0
+
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -73,10 +82,27 @@ while cap.isOpened():
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
             mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-            draw_debug_panel(frame, hand_landmarks)
+            # draw_debug_panel(frame, hand_landmarks)
+            landmarks = hand_landmarks.landmark
 
             # Detect gestures
-            if gt.is_fist(hand_landmarks):
+            if gt.is_pinch(mp_hands.HandLandmark.THUMB_TIP, mp_hands.HandLandmark.INDEX_FINGER_TIP, landmarks):
+
+                 # Get index finger tip coordinates
+                index_x = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].x
+                index_y = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+
+                # Convert to screen coordinates
+                mouse_x = np.interp(index_x, [0, 1], [0, screen_w])
+                mouse_y = np.interp(index_y, [0, 1], [0, screen_h])
+
+                # Smooth the movement
+                mouse_x = prev_x + (mouse_x - prev_x) / smoothing_factor
+                mouse_y = prev_y + (mouse_y - prev_y) / smoothing_factor
+
+                pyautogui.moveTo(mouse_x, mouse_y)
+                prev_x, prev_y = mouse_x, mouse_y
+            elif gt.is_fist(hand_landmarks):
                 cv2.putText(frame, "Fist", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             elif gt.is_thumbs_up(hand_landmarks):
                 cv2.putText(frame, "Thumbs Up", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
