@@ -1,121 +1,111 @@
 import cv2
 import mediapipe as mp
-import time
 import numpy as np
-import pyautogui
+from pyautogui import scroll, size
+from pynput.mouse import Button, Controller
 import gestures as gt
-import warnings
+import warnings 
 warnings.filterwarnings("ignore", message=".NORM_RECT without IMAGE_DIMENSIONS.")
 
-# Optimize the performance
 cv2.setUseOptimized(True)
 cv2.setNumThreads(12)
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
-mp_drawing = mp.solutions.drawing_utils
-
-# Colors (BRG Format)
-COLOR_BACKGROUND = (20, 20, 40)  # Dark blue
-COLOR_WHITE = (255, 255, 255)  # White
-
-prev_time = 0
-
-# Open a video file or capture from webcam
-video_path = 0  # Replace with your video path or use 0 for webcam
-cap = cv2.VideoCapture(video_path)
-
-cap.set(cv2.CAP_PROP_FPS, 30)
-
-def draw_debug_panel(frame, hand_landmarks):
-    """
-    Draws a debug panel with landmark coordinates.
-    """
-    h, w, _ = frame.shape
-    panel_width = 300
-    cv2.rectangle(frame, (w - panel_width, 0), (w, h), COLOR_BACKGROUND, -1)
-
-    # Header.
-    cv2.putText(frame, "DEBUG PANEL", (w - panel_width + 10, 30),
-                cv2.FONT_HERSHEY_DUPLEX, 0.8, COLOR_WHITE, 1, cv2.LINE_AA)
-
-    # Landmark coordinates.
-    y_offset = 70
-    for idx, lm in enumerate(hand_landmarks.landmark):
-        cx, cy = int(lm.x * w), int(lm.y * h)
-        cv2.putText(frame, f"Landmark {idx}: ({cx}, {cy})",
-                    (w - panel_width + 10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_WHITE, 1, cv2.LINE_AA)
-        y_offset += 20
+hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.7)
 
 # Screen dimensions
-screen_w, screen_h = pyautogui.size()
+screen_w, screen_h = size()
+
+mouse = Controller()
+click_performed = False  # Flag to prevent multiple clicks
+
+prev_x = None
+prev_y = None
 
 # Smoothing parameters (to reduce mouse jitter)
-smoothing_factor = 2
-prev_x, prev_y = 0, 0
+smoothing_factor = 30
+sensitivity = 9
 
+cap = cv2.VideoCapture(0)  # Initialize camera
 
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
 
-    # Convert the frame to RGB
+    # Flip the frame for natural movement
+    frame = cv2.flip(frame, 1)
     image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    # Process the frame with MediaPipe
     results = hands.process(image_rgb)
 
-    # Calculate FPS
-    current_time = time.time()
-    delta_time = current_time - prev_time
-    fps = 1 / delta_time if delta_time > 0 else 0
-    prev_time = current_time
-
-    # Display the FPS
-    fps_text = f"FPS: {int(fps)}"
-    cv2.putText(frame, fps_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
-
-    # Draw landmarks
     if results.multi_hand_landmarks:
         for hand_landmarks in results.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-            # draw_debug_panel(frame, hand_landmarks)
             landmarks = hand_landmarks.landmark
 
-            # Detect gestures
-            if gt.is_pinch(mp_hands.HandLandmark.THUMB_TIP, mp_hands.HandLandmark.INDEX_FINGER_TIP, landmarks):
+            # Thumb + Index Pinch: Move Mouse
+            if gt.is_pinch(mp_hands.HandLandmark.THUMB_TIP,
+               mp_hands.HandLandmark.INDEX_FINGER_TIP, landmarks):
+                # Get the normalized index fingertip coordinates (range 0 to 1)
+                current_x = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].x
+                current_y = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
 
-                 # Get index finger tip coordinates
-                index_x = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].x
-                index_y = landmarks[mp_hands.HandLandmark.INDEX_FINGER_TIP].y
+                # If this is the first frame of the pinch, initialize prev_x and prev_y
+                if prev_x is None or prev_y is None:
+                    prev_x = current_x
+                    prev_y = current_y
+                else:
+                    # Calculate the relative movement (delta) since the last frame
+                    delta_x = current_x - prev_x
+                    delta_y = current_y - prev_y
 
-                # Convert to screen coordinates
-                mouse_x = np.interp(index_x, [0, 1], [0, screen_w])
-                mouse_y = np.interp(index_y, [0, 1], [0, screen_h])
+                    # Invert the x movement if desired (to reverse the direction)
+                    delta_x = -delta_x
 
-                # Smooth the movement
-                mouse_x = prev_x + (mouse_x - prev_x) / smoothing_factor
-                mouse_y = prev_y + (mouse_y - prev_y) / smoothing_factor
+                    # Convert the relative movement to screen pixels
+                    # (Assuming screen_w and screen_h are your screen dimensions)
+                    move_x = delta_x * screen_w * sensitivity
+                    move_y = delta_y * screen_h * sensitivity
 
-                pyautogui.moveTo(mouse_x, mouse_y)
-                prev_x, prev_y = mouse_x, mouse_y
-            elif gt.is_fist(hand_landmarks):
-                cv2.putText(frame, "Fist", (50, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            elif gt.is_thumbs_up(hand_landmarks):
-                cv2.putText(frame, "Thumbs Up", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            elif gt.is_peace_sign(hand_landmarks):
-                cv2.putText(frame, "Peace Sign", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    # Apply smoothing by dividing the movement (optional)
+                    move_x = move_x / smoothing_factor
+                    move_y = move_y / smoothing_factor
 
-    # Display the image
-    cv2.imshow('Hand Gesture Detection', frame)
+                    # Move the mouse relatively; Controller.move() adds the offset to the current position
+                    mouse.move(move_x, move_y)
 
-    # Break the loop if 'q' is pressed
+                    # Update previous pinch coordinates for the next frame
+                    prev_x = current_x
+                    prev_y = current_y
+            else:
+                # If pinch is not detected, reset the previous coordinates so the next pinch starts fresh
+                prev_x = None
+                prev_y = None
+
+            # Thumb + Middle Pinch: Left Click
+            if gt.is_pinch(mp_hands.HandLandmark.THUMB_TIP, mp_hands.HandLandmark.MIDDLE_FINGER_TIP, landmarks):
+                if not click_performed:  # Click only if it hasn't been done yet
+                    mouse.click(Button.left)
+                    click_performed = True  # Set flag to prevent further clicks
+                else:
+                    click_performed = False  # Reset flag when pinch is released
+
+            # Thumb + Ring Pinch: Right Click
+            if gt.is_pinch(mp_hands.HandLandmark.THUMB_TIP, mp_hands.HandLandmark.RING_FINGER_TIP, landmarks):
+                if not click_performed:  # Click only if it hasn't been done yet
+                    mouse.click(Button.right)
+                    click_performed = True  # Set flag to prevent further clicks
+                else:
+                    click_performed = False  # Reset flag when pinch is released
+
+            # Thumb + Pinky Pinch: Scroll
+            if gt.is_pinch(mp_hands.HandLandmark.THUMB_TIP, mp_hands.HandLandmark.PINKY_TIP, landmarks):
+                pinky_y = landmarks[mp_hands.HandLandmark.PINKY_TIP].y
+                scroll_amount = np.interp(pinky_y, [0, 1], [100, -100])  # Adjust scroll sensitivity
+                scroll(int(scroll_amount))
+
+    # Exit on 'q' key press (works even without cv2.imshow)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Release the video capture object and close all OpenCV windows
 cap.release()
-cv2.destroyAllWindows()
